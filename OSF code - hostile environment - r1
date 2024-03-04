@@ -1,0 +1,323 @@
+
+//////////////////////////////////////////////////////////////////////////////
+// Difference-in-differences analysis for manuscript: Exploring the impact  //
+//	of hostile environment policies on psychological distress of ethnic     //
+//  groups in the UK														                            //
+//															                                    				//	
+// Updated Sept 2023 - original submission							                		//
+// Updated Mar 2024 - revision 1									                      		//
+// 																		                                    	//
+// Code by Kate Dotsikas & Jen Dykxhoorn								                  	//
+// 																	                                    		//
+//////////////////////////////////////////////////////////////////////////////
+
+cd "C:\...\Analysis"
+
+/////////////////////////////////////////////////////////////////////////////
+// Analysis for revision 1
+
+log using "r1-missing.smcl", replace
+//////////////////////////////////////////////////////////////////////////////
+// Analysis of missingness and attrition
+	
+use "didanalysis_r1.dta", clear
+
+////////////////////////////////////////////////////////////////////////////////
+// ITEM NON-RESPONSE - COVARIATE MISSING 
+*Covariates were estimated at Wave 1. Below is the exploration of missingness for exposures, outcomes, and covariates. As participants were excluded if they were under the age of 16, and with ethnicity information, there was no missingness for these variables 
+
+keep if wave==1
+
+gen complete=0
+	replace complete=1 if age==.
+	replace complete=1 if edu==.
+	replace complete=1 if citizen==.
+	replace complete=1 if urban==.
+	replace complete=1 if marital==.
+	replace complete=1 if ethnicity==.
+	replace complete=1 if ghq2_==.	
+tab complete, m 	
+
+bysort complete: tab ethnicity, m 
+bysort complete: tab sex, m
+bysort complete: sum age 
+bysort complete: tab edu, m 
+bysort complete: tab citizen, m
+bysort complete: tab urban, m
+bysort complete: tab marital, m
+bysort complete: sum ghq2_ 
+
+//Are some more likely to have missing data than others? Using logit approach but could use anova as they are conceptually equivalent - look to see if some groups are more likely to be missing - eg are males more likely to be missing than females, are minoritised ethnic groups more likely to be missing than White British. 
+logit complete ib6.ethnicity, or 
+logit complete i.sex, or 
+logit complete i.edu, or
+logit complete i.citizen, or
+logit complete ib1.urban, or
+logit complete i.marital, or
+regress complete age 
+regress complete ghq2_
+
+////////////////////////////////////////////////////////////////////////////////
+// WAVE NON RESPONSE 
+bysort wave: tab ioutcome, m
+
+gen participate =.
+	replace participate = 1 if ioutcome==11 | ioutcome==21
+	replace participate = 0 if ioutcome ==13 | ioutcome==23 
+		lab def participate 0"proxy" 1"responded"
+		lab val participate participate 
+			tab participate, m 
+			tab wave participate, m row
+	replace participate=. if participate==0
+		 tab wave participate, m 
+		 tab participate wave, col m
+*marital		 
+tab wave marital if participate==1, m
+	replace marital = . if marital <0
+		tab wave marital if participate==1, m 
+		tab wave marital if participate==1, m row 
+*edu		
+tab wave edu if participate==1, m 
+tab wave edu if participate==1, m row 
+*citizen	
+tab wave citizen if participate==1, m 
+tab wave citizen if participate==1, m row 
+*urban		
+replace urban =. if urban <0
+tab wave urban if participate==1, m 
+tab wave urban if participate==1, m row 
+*GHQ
+tab sex if wave==1 & participate==1 & ghq2_==.
+tab sex if wave==2 & participate==1 & ghq2_==.
+tab sex if wave==3 & participate==1 & ghq2_==.
+tab sex if wave==4 & participate==1 & ghq2_==.
+tab sex if wave==5 & participate==1 & ghq2_==.
+tab sex if wave==6 & participate==1 & ghq2_==.
+tab sex if wave==7 & participate==1 & ghq2_==.
+tab sex if wave==8 & participate==1 & ghq2_==.
+tab sex if wave==9 & participate==1 & ghq2_==.
+tab sex if wave==10 & participate==1 & ghq2_==.
+		
+		
+//////////////////////////////////////////////////////////////////////////////
+* MEAN GHQ SCORE BY ETHNICITY FOR EACH WAVE
+bysort wave ethnicity: sum ghq2_ 
+
+log close
+
+
+
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+log using "r1-complete case-descriptives.smcl", replace
+
+//COMPLETE CASE - DESCRIPTIVES
+use "didanalysis_v2.dta", clear	
+	compress
+
+*Check coding before dropping missing values	
+replace age=. if age <0
+replace urban=. if urban<0
+replace marital=. if marital<0
+replace citizen=. if citizen<0
+replace edu=. if edu<0
+replace ethnicity=. if ethnicity<0
+replace ghq2_=. if ghq2_<0
+
+*Drop observations with any missing values	
+drop if age==.
+drop if edu==.
+drop if citizen==.
+drop if urban==.
+drop if marital==.
+drop if ethnicity==.
+drop if ghq2_==.
+
+save "didanalysis_cc.dta", replace
+
+*Descriptive statistics n=36,007
+tab sex  if wave==1, m
+	sum age if wave==1
+tab edu if wave==1, m
+tab citizen  if wave==1, m
+tab urban  if wave==1, m
+tab marital  if wave==1, m
+	sum ghq2_ if wave==1 
+
+*by ethnicity - supplemental table 1
+bysort ethnicity: tab sex  if wave==1, m
+	bysort ethnicity: sum age if wave==1
+bysort ethnicity: tab edu if wave==1, m
+bysort ethnicity: tab citizen  if wave==1, m
+bysort ethnicity: tab urban  if wave==1, m
+bysort ethnicity: tab marital  if wave==1, m
+	bysort ethnicity: sum ghq2_ if wave==1 
+
+log close 
+
+
+//////////////////////////////////////////////////////////////////////////////
+
+log using "r1-complete case-analysis-pidp.smcl", replace
+// COMPLETE CASE - ANALYSIS 
+
+*LRT for interaction to test if the interaction improves model fit- using complete case sample
+mixed  ghq2_ era ib6.ethnicity ||pidp:
+	estimates store m1
+mixed  ghq2_ era##ib6.ethnicity ||pidp:
+	estimates store m2
+lrtest m1 m2
+	* LR chi2(11) =  41.15,  Prob > chi2 = 0.0000
+
+
+
+*Check the icc (intraclass correlation) for pidp and psu. 
+*Ideally we would account for both, but if the model fails to converge, it is more important to account for pidp clustering as it is more correlated than PSU
+
+//Unadjusted (complete case) - see what level is to include in clusters by testinc ICC
+*pidp clustered
+mixed  ghq2_ era##ib6.ethnicity [pweight=analysisweight10] ||pidp: 
+	margins era##ethnicity
+	estat icc
+	*marginsplot
+*Don't need to run the marginsplot command as all data vis will be in R 
+
+*psu clustered
+mixed  ghq2_ era##ib6.ethnicity [pweight=analysisweight10] || psu: 
+	margins era##ethnicity
+	estat icc
+
+*both pidp and psu - won't converge
+mi estimate: mixed  ghq2_ era##ib6.ethnicity [pweight=analysisweight10] ||pidp: || psu: 
+	margins era##ethnicity
+	estat icc 
+
+	
+//PIDP only - ICC shows that it is more correlated than PSU, so more important to account for the within-individual clustering (which implicitly must capture some of the sampling design)
+
+//Unadjusted (complete case)
+mixed  ghq2_ era##ib6.ethnicity [pweight=analysisweight10] ||pidp: 
+	margins era##ethnicity
+
+//Adjusted (complete case) 
+mixed  ghq2_ era##ib6.ethnicity sex age marital edu citizen urban [pweight=analysisweight10] ||pidp:  
+	margins era##ethnicity	
+	
+log close
+	
+	
+	
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+log using "r1-imputed-descriptives.smcl", replace 
+
+/////////////////////////////////////////////////////////////////////////////////
+// IMPUTED ANALYSIS 
+
+*Initially did analysis using 20 imputed datasets, but increased to m=100 datasets, once we noticed that the FMI 	was higher in the unadjusted model than the FMI=0.2 in the adjusted model we increased the number of imputations
+
+use "didanalysis_r1.dta", clear
+
+// Data check and Descriptives 
+*check that all missing across all waves is correctly coded before imputing (all -8 and -9 recoded as .)
+tab ethnicity, m 
+tab sex, m 
+tab edu, m 
+tab citizen, m 
+tab urban, m 
+tab marital, m 
+	br if age<0
+	br if ghq2_<0
+ 
+//Descriptives
+	*check that n=42968
+tab sex ethnicity if wave==1, m col
+	bysort ethnicity: sum age if wave==1
+bysort ethnicity: tab edu if wave==1, m
+bysort ethnicity: tab citizen  if wave==1, m
+bysort ethnicity: tab urban  if wave==1, m
+bysort ethnicity: tab marital  if wave==1, m
+	bysort ethnicity: sum ghq2_ if wave==1 
+
+log close
+
+//////////////////////////////////////////////////////////////////////////////
+
+log using "r1-imputed-analysis.smcl", replace 
+
+/////////////////////////////////////////////////////////////////////////////////
+//Imputation and imputed analysis 
+mi set mlong
+*mi xtset, clear
+
+mi reshape wide age fimnnet_dv country ghq2_ edu citizen sf12p marital urban era ioutcome, i(pidp) j(wave)
+
+mi register imputed ghq2_1 ghq2_2 ghq2_3 ghq2_4 ghq2_5 ghq2_6 ghq2_7 ghq2_8 ghq2_9 ghq2_10 citizen1 citizen2 citizen3 citizen4 citizen5 citizen6 citizen7 citizen8 citizen9 citizen10 sf12p1 sf12p2 sf12p3 sf12p4 sf12p5 sf12p6 sf12p7 sf12p8 sf12p9 sf12p10 fimnnet_dv2 fimnnet_dv3 fimnnet_dv4 fimnnet_dv5 fimnnet_dv6 fimnnet_dv7 fimnnet_dv8 fimnnet_dv9 fimnnet_dv10 
+
+mi impute chained (regress) ghq2_1 ghq2_2 ghq2_3 ghq2_4 ghq2_5 ghq2_6 ghq2_7 ghq2_8 ghq2_9 ghq2_10 sf12p2 sf12p3 sf12p4 sf12p5 sf12p6 sf12p7 sf12p8 sf12p9 sf12p10 fimnnet_dv2 fimnnet_dv3 fimnnet_dv4 fimnnet_dv5 fimnnet_dv6 fimnnet_dv7 fimnnet_dv8 fimnnet_dv9 fimnnet_dv10 = urban1 age1 fimnnet_dv1 country1 transind1 transind2 transind3 transind4 transind5 transind6 transind7 transind8 transind9 transind10 postind1 postind2 postind3 postind4 postind5 postind6 postind7 postind8 postind9 postind10 transpak1 transpak2 transpak3 transpak4 transpak5 transpak6 transpak7 transpak8 transpak9 transpak10 postpak1 postpak2 postpak3 postpak4 postpak5 postpak6 postpak7 postpak8 postpak9 postpak10 transbang1 transbang2 transbang3 transbang4 transbang5 transbang6 transbang7 transbang8 transbang9 transbang10 postbang1 postbang2 postbang3 postbang4 postbang5 postbang6 postbang7 postbang8 postbang9 postbang10 transcar1 transcar2 transcar3 transcar4 transcar5 transcar6 transcar7 transcar8 transcar9 transcar10 postcar1 postcar2 postcar3 postcar4 postcar5 postcar6 postcar7 postcar8 postcar9 postcar10 transaf1 transaf2 transaf3 transaf4 transaf5 transaf6 transaf7 transaf8 transaf9 transaf10 postaf1 postaf2 postaf3 postaf4 postaf5 postaf6 postaf7 postaf8 postaf9 postaf10 transera1 transera2 transera3 transera4 transera5 transera6 transera7 transera8 transera9 transera10 postera1 postera2 postera3 postera4 postera5 postera6 postera7 postera8 postera9 postera10 indian bangladeshi pakistani caribbean african [pweight=analysisweight10], add(100) rseed(3732) quietly
+
+save "didanalysis_mi100_r1.dta", replace
+
+////////////////////////////////////////////////////////////////////////////////
+
+*Install mimargns 
+ssc install mimrgns 
+
+//DID analysis
+mi reshape long age fimnnet_dv country ghq2_  edu citizen sf12p marital urban era ioutcome, i(pidp) j(wave)
+*mi xtset pidp wave
+
+*Unadjusted (imputed)
+mi estimate: mixed  ghq2_ era##ib6.ethnicity [pweight=analysisweight10] || pidp: 
+	mimrgns era##ethnicity
+	estat icc 
+	*check the FMI (fraction of missing information - the total of the sampling variance due to missing data, estiissing data. an FMI of 0.26 means that 26% of the total sampling variance is attributable to missing data. Can be used to decide on number of imputed datasets (e.g. should use at least 26 imputed datasets))
+
+mi estimate: mixed  ghq2_ era##ib6.ethnicity [pweight=analysisweight10] ||pidp: ||psu: 
+	mimrgns era##ethnicity
+	estat icc
+
+*Adjusted (imputed) 
+mi estimate: mixed  ghq2_ era##ib6.ethnicity sex age marital edu citizen urban   [pweight=analysisweight10] ||pidp: 
+	mimrgns era##ethnicity
+	estat icc
+
+mi estimate: mixed  ghq2_ era##ib6.ethnicity sex age marital edu citizen urban   [pweight=analysisweight10] ||pidp: ||psu: 
+	mimrgns era##ethnicity
+	estat icc
+
+log close 
+
+
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+// Citizen status - had done as sensitivity, didn't create supplemental tables for it. 
+
+log using "r1-citizen.smcl", replace
+* use "didanalysis_mi100_r1.dta", clear
+
+// Citizenship status - IMPUTED
+mi estimate: mixed  ghq2_ era##i.citizen [pweight=analysisweight10] || pidp: 
+	mimrgns era##citizen
+mi estimate: mixed  ghq2_ era##i.citizen sex age marital edu urban ethnicity  [pweight=analysisweight10] || pidp: 
+	mimrgns era##citizen 
+
+// Citizenship status - COMPLETE CASE	
+use "didanalysis_cc.dta", clear
+mixed  ghq2_ era##i.citizen [pweight=analysisweight10] || pidp: 
+	margins era##citizen
+mixed  ghq2_ era##i.citizen sex age marital edu urban i.ethnicity  [pweight=analysisweight10] || pidp: 
+	margins era##citizen
+log close
+		
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+	
+
